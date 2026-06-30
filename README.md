@@ -1,0 +1,1 @@
+# example_aggregated_storage
