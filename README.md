@@ -3,13 +3,9 @@
 A blueprint for confidential secret storage with attested retrieval, designed for
 MPC-style (multi-party computation) consumption scenarios.
 
-Multiple clients encrypt private data and upload it to a **storage enclave**.
-The encrypted data lives in S3 (via the [Tinfoil buckets sidecar](https://github.com/tinfoilsh/tinfoil-buckets-sidecar));
-only public inventory data (item ID, user ID, user-supplied metadata JSON) is kept in a
-**shared Postgres database**. A **consumer enclave** attests itself to
-the storage enclave, receives encryption keys over an attested TLS channel, and
-fetches the encrypted data from S3 for in-memory processing. Plaintext is never
-persisted outside the enclaves.
+Multiple clients update data, a client manages secret key, and some id (item ID, user ID, user-supplied metadata JSON) to a **storage enclave** over an attested TLS channel.
+The storage enclave stores the id in clear to an inventory database (in order to keep track of what data has been collected) and use the key provided by the client to store the data encypted using a [Tinfoil Bucket](https://github.com/tinfoilsh/tinfoil-buckets-sidecar));
+Several **consumer enclaves** attest themselves to the storage enclave, receives encryption keys over an attested TLS channel, and fetches the encrypted data from the Tinfoil Bucket for in-memory processing. Plaintext is never persisted outside the enclaves.
 
 ## Architecture
 
@@ -19,13 +15,13 @@ persisted outside the enclaves.
 
 ### 1. Storage Enclave (`confidential-secret-storage`)
 
-Accepts encrypted data from clients and manages the inventory + key lifecycle.
+Accepts data from clients and manages the inventory + key lifecycle.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Liveness check |
 | `/upload_key` | POST | Register a per-user 256-bit encryption key (base64, in-memory) |
-| `/store` | POST | Encrypt data with the user's key, PUT to S3 via buckets sidecar, write inventory record to Postgres |
+| `/store` | POST | Encrypt data with the user's key, PUT to S3 via Tinfoil buckets sidecar, write inventory record to DB |
 | `/push` | POST | Attest the consumer enclave, then deliver encryption keys over attested TLS to the consumer's `/receive` |
 
 The storage enclave holds encryption keys **in memory only**. On restart, clients
@@ -33,7 +29,7 @@ must re-upload their keys via `/upload_key`.
 
 ### 2. Consumer Enclave (`confidential-debug-secret-consumer`)
 
-Retrieves encrypted data from S3 and processes it in-memory for MPC consumption.
+Retrieves encrypted data from Tinfoil Bucket and processes it in-memory for MPC consumption.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -88,8 +84,8 @@ and decryption on GET using the `X-Tinfoil-Encryption-Key` header.
 
 6. On `POST /consume`, the consumer:
    - Reads all item IDs + inventory data from Postgres
-   - For each item, fetches the encrypted object from S3 via the buckets sidecar
-     using the in-memory encryption key (sidecar decrypts transparently)
+   - For each item, fetches the encrypted object from Tinfoil Bucket
+     using the in-memory encryption key (sidecar container decrypts transparently)
    - Processes the plaintext in-memory (never persisted)
    - Returns aggregate stats (dataset count, total bytes, per-item inventory)
 
