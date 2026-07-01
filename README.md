@@ -76,16 +76,15 @@ and decryption on GET using the `X-Tinfoil-Encryption-Key` header.
 4. The storage enclave:
    - Attests the consumer using `SecureClient` (verifies the consumer runs the
      expected code from `CONSUMER_REPO` via remote attestation)
-   - Collects all item IDs + their encryption keys from memory
-   - Sends `[{id, key}, ...]` to the consumer's `/receive` over the attested TLS channel
+   - Sends `{user_id, key}` pairs to the consumer's `/receive` over the attested TLS channel
 
-5. The consumer stores the keys in memory and reads item inventory from the shared
-   Postgres.
+5. The consumer stores the keys in memory (`user_id -> key`) and reads item inventory
+   from the shared Postgres (which maps `id -> user_id`).
 
 6. On `POST /consume`, the consumer:
-   - Reads all item IDs + inventory data from Postgres
-   - For each item, fetches the encrypted object from Tinfoil Bucket
-     using the in-memory encryption key (sidecar container decrypts transparently)
+   - Reads all items from Postgres (gets `id` + `user_id` for each)
+   - Joins `user_id` with the in-memory key map to find the encryption key
+   - Fetches the encrypted object from Tinfoil Bucket using that key (sidecar decrypts)
    - Processes the plaintext in-memory (never persisted)
    - Returns aggregate stats (dataset count, total bytes, per-item inventory)
 
@@ -96,7 +95,6 @@ and decryption on GET using the `X-Tinfoil-Encryption-Key` header.
 | Encryption keys | In-memory (storage + consumer enclaves) | No (lost on restart) |
 | Encrypted data (plaintext) | S3 via buckets sidecar | Yes (encrypted at rest) |
 | Public inventory (id, user_id, metadata JSON) | Shared Postgres | Yes |
-| Key bundles (id + key) | Attested TLS channel only | No (transient) |
 
 ## Configuration
 
